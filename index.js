@@ -213,10 +213,10 @@ function startBot({ appState, prefix, adminID }) {
 
         // some random replies for fyt mode — change these as you like
         const fytReplies = [
-            "Tujhe Teri Maki Chur Ki Kasam Mujhe Gali Dega To Tu Randi Ka Hoga ? :)",
-            "Idhar Bat Na Kr Bhai Me Bot Hu Teri Maa Chkd Duga ! :) (y)",
+            "Tujhe Teri Maki Chut Ki Kasam Mujhe Gali Dega To Tu Randi Ka Hoga ? :)",
+            "Idhar Bat Na Kr Bhai Me Bot Hu Teri Maa Cho0d Duga ! :) (y)",
             "Chup Randi Ke Baxh3 I Wan_T t0 Eat Y0ur Maki Xh0oT ;3 (y) || <3",
-            "Chul Randi Ke Bache Teri Bahen Chud Rhu Kya Jo Itna Ro Rha Hai ? =D (Y)",
+            "Chup Randi Ke Bache Teri Bahen Chud Rhu H Kya Jo Itna Ro Rha Hai ? =D (Y)",
             "Chup Randi k3 Baxh3 Ab Kuch b0la To0 T3r1 Maa Xho0d DuGa :) <3"
         ];
 
