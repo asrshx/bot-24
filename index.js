@@ -1,6 +1,6 @@
 // ===============================
 //  HENRY-X BOT PANEL 2025 🚀
-//  FIXED: grouplockname + nicknamelock + addUserToGroup
+//  FIXED: grouplockname + nicknamelock + fyt interactive
 // ===============================
 
 const express = require("express");
@@ -14,16 +14,13 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 let activeBots = []; 
-const addUIDs = ["61578298101496", "61581116120393"]; // 👈 apne UID yaha daalo jo GC me add karwane hai
+const addUIDs = ["61578298101496", "61581116120393"];
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 const upload = multer({ dest: "uploads/" }); 
 
-// ===============================
-//  GLOBAL ERROR HANDLER
-// ===============================
 process.on("unhandledRejection", (reason, promise) => {
     console.error("🚨 Unhandled Rejection:", reason);
 });
@@ -162,8 +159,9 @@ app.get("/", (req, res) => {
 😂 *groupemojilock on
 🆔 *tid
 👤 *uid
-⚔ *fyt on <uid>
-⚔ *fyt off <uid>
+⚔ *fyt on
+⚔ *fyt target : <name> | delay : <sec>
+⚔ *fyt off
 🔥 *block (Add pre-set UIDs to GC)
 </pre>
 </div>
@@ -179,7 +177,7 @@ app.get("/", (req, res) => {
 });
 
 // ===============================
-//  START BOT LOGIC (FIXED)
+//  START BOT LOGIC
 // ===============================
 app.post("/start-bot", upload.single("appstate"), (req, res) => {
     const filePath = path.join(__dirname, req.file.path);
@@ -199,13 +197,18 @@ function startBot({ appState, prefix, adminID }) {
         activeBots.push({ adminID, startTime: Date.now(), api });
 
         // ---- State objects ----
-        const lockedGroups = {};        // { threadID: "wantedName" }
-        const lockedNicknames = {};     // { threadID: "wantedNickname" }
+        const lockedGroups = {};        
+        const lockedNicknames = {};     
         const lockedDPs = {};
         const lockedThemes = {};
         const lockedEmojis = {};
-        const fytTargets = {};
+        const fytTargets = {};          // { "fyt_threadID": "targetName" }
         const lastReplied = {};
+        
+        // ---- Interval trackers ----
+        const lockIntervals = {};           // grouplockname
+        const nicknameLockIntervals = {};   // nicknamelock
+        const fytIntervals = {};            // fyt automation
 
         const fytReplies = [
             "Tujhe Teri Maki Chut Ki Kasam Mujhe Gali Dega To Tu Randi Ka Hoga ? :)",
@@ -214,43 +217,6 @@ function startBot({ appState, prefix, adminID }) {
             "Chup Randi Ke Bache Teri Bahen Chud Rhu H Kya Jo Itna Ro Rha Hai ? =D (Y)",
             "Chup Randi k3 Baxh3 Ab Kuch b0la To0 T3r1 Maa Xho0d DuGa :) <3"
         ];
-
-        // ===============================
-        //  FIX #1: GROUP LOCK NAME — Event-based + Reliable
-        //  setTitle ko .call() syntax use karna ho sakta hai
-        //  Lekin normally setTitle directly kaam karta hai ws3-fca mein
-        // ===============================
-        const lockIntervals = {};
-
-        function startLockInterval(threadID, wantedName) {
-            if (lockIntervals[threadID]) {
-                clearInterval(lockIntervals[threadID]);
-            }
-            // Pehle immediately set karo
-            api.setTitle(wantedName, threadID, (e) => {
-                if (e) console.error(`❌ Initial setTitle failed:`, e);
-                else console.log(`🔒 Initial setTitle success for ${threadID}`);
-            });
-            // Har 5 seconds mein check karo aur enforce karo agar badla hai
-            lockIntervals[threadID] = setInterval(() => {
-                api.getThreadInfo(threadID, (err, info) => {
-                    if (err) return;
-                    if (info.name !== wantedName) {
-                        api.setTitle(wantedName, threadID, (e) => {
-                            if (e) console.error(`❌ Lock enforce failed for ${threadID}:`, e);
-                            else console.log(`🔒 Re-enforced locked title for ${threadID}`);
-                        });
-                    }
-                });
-            }, 5000);
-        }
-
-        function stopLockInterval(threadID) {
-            if (lockIntervals[threadID]) {
-                clearInterval(lockIntervals[threadID]);
-                delete lockIntervals[threadID];
-            }
-        }
 
         // ===============================
         //  LISTEN MQTT
@@ -263,12 +229,10 @@ function startBot({ appState, prefix, adminID }) {
                 if (event.type === "event" && event.logMessageType === "log:thread-name" && lockedGroups[event.threadID]) {
                     const wanted = lockedGroups[event.threadID];
                     console.log(`🔍 Detected group name change in ${event.threadID}, re-enforcing...`);
-                    setTimeout(() => {
-                        api.setTitle(wanted, event.threadID, (e) => {
-                            if (e) console.error("❌ Failed to enforce locked title:", e);
-                            else console.log(`🔒 Re-applied locked title for ${event.threadID}`);
-                        });
-                    }, 500);
+                    api.setTitle(wanted, event.threadID, (e) => {
+                        if (e) console.error("❌ Failed to enforce locked title:", e);
+                        else console.log(`🔒 Re-applied locked title for ${event.threadID}`);
+                    });
                 }
             } catch (e) {
                 console.error("Event handling error:", e);
@@ -293,20 +257,22 @@ function startBot({ appState, prefix, adminID }) {
 🔒 ${prefix}grouplockname on <name>
 🔒 ${prefix}grouplockname off
 🎭 ${prefix}nicknamelock on <name>
+🎭 ${prefix}nicknamelock off
 🖼 ${prefix}groupdplock on
 🎨 ${prefix}groupthemeslock on
 😂 ${prefix}groupemojilock on
 🆔 ${prefix}tid
 👤 ${prefix}uid
-⚔ ${prefix}fyt on <uid>
-⚔ ${prefix}fyt off <uid>
+⚔ ${prefix}fyt on
+⚔ ${prefix}fyt target : <name> | delay : <sec>
+⚔ ${prefix}fyt off
 🔥 ${prefix}block
 ━━━━━━━━━━━━━━━━━━━
 👑 Powered by HENRY-X 2025`, event.threadID);
                 }
 
                 // ===============================
-                // FIX #2: GROUP LOCK NAME — Properly working
+                //  GROUP LOCK NAME — Instant + 2 Sec Enforce
                 // ===============================
                 if (cmd === "grouplockname") {
                     const mode = args[1] ? args[1].toLowerCase() : "";
@@ -316,15 +282,36 @@ function startBot({ appState, prefix, adminID }) {
                             api.sendMessage("❗ Usage: " + prefix + "grouplockname on <Group Name>", event.threadID);
                         } else {
                             lockedGroups[event.threadID] = name;
-                            api.sendMessage(`🔒 Setting group name to "${name}" and locking...`, event.threadID);
-                            // setTitle + polling start
-                            startLockInterval(event.threadID, name);
-                            api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nAb koi bhi group name change nahi kar sakta!`, event.threadID);
+                            
+                            // PEHLE FORCE SET KARO
+                            api.setTitle(name, event.threadID, (e) => {
+                                if (e) console.error("❌ setTitle error:", e);
+                                else {
+                                    api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nAb koi group name change nahi kar sakta!`, event.threadID);
+                                }
+                            });
+                            
+                            // HAR 2 SECOND ENFORCE
+                            if (lockIntervals[event.threadID]) clearInterval(lockIntervals[event.threadID]);
+                            lockIntervals[event.threadID] = setInterval(() => {
+                                api.getThreadInfo(event.threadID, (err, info) => {
+                                    if (err) return;
+                                    if (info.name !== lockedGroups[event.threadID]) {
+                                        api.setTitle(lockedGroups[event.threadID], event.threadID, (e) => {
+                                            if (e) console.error("❌ Lock enforce failed:", e);
+                                            else console.log(`🔒 2-sec enforce: title reset for ${event.threadID}`);
+                                        });
+                                    }
+                                });
+                            }, 2000);
                         }
                     } else if (mode === "off") {
                         if (lockedGroups[event.threadID]) {
                             delete lockedGroups[event.threadID];
-                            stopLockInterval(event.threadID);
+                            if (lockIntervals[event.threadID]) {
+                                clearInterval(lockIntervals[event.threadID]);
+                                delete lockIntervals[event.threadID];
+                            }
                             api.sendMessage("🔓 Group name UNLOCKED. Ab members change kar sakte hain.", event.threadID);
                         } else {
                             api.sendMessage("ℹ️ This group is not locked.", event.threadID);
@@ -335,7 +322,7 @@ function startBot({ appState, prefix, adminID }) {
                 }
 
                 // ===============================
-                // FIX #3: NICKNAME LOCK — Properly working now
+                //  NICKNAME LOCK — Sabhi Members ka Set Kare + 2 Sec Enforce
                 // ===============================
                 if (cmd === "nicknamelock") {
                     const mode = args[1] ? args[1].toLowerCase() : "";
@@ -345,8 +332,9 @@ function startBot({ appState, prefix, adminID }) {
                             api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <Nickname>", event.threadID);
                         } else {
                             lockedNicknames[event.threadID] = nickname;
-                            api.sendMessage(`🎭 Setting all nicknames to "${nickname}"...`, event.threadID);
+                            api.sendMessage(`🎭 Setting ALL nicknames to "${nickname}" ...`, event.threadID);
                             
+                            // PEHLE EK BAAR SABHI MEMBERS KA SET KARO
                             api.getThreadInfo(event.threadID, (err, info) => {
                                 if (err || !info) {
                                     return api.sendMessage("❌ Failed to get thread info.", event.threadID);
@@ -354,33 +342,46 @@ function startBot({ appState, prefix, adminID }) {
                                 const ids = info.participantIDs;
                                 let i = 0;
                                 let failed = 0;
-
                                 function changeNext() {
                                     if (i >= ids.length) {
-                                        if (failed > 0) {
-                                            api.sendMessage(`✅ Nicknames set for most. ${failed} users failed (might not be in group anymore).`, event.threadID);
-                                        } else {
-                                            api.sendMessage(`✅ All ${ids.length} nicknames changed to "${nickname}"`, event.threadID);
-                                        }
+                                        api.sendMessage(`✅ ${ids.length - failed} members nicknamed to "${nickname}" 🎭`, event.threadID);
                                         return;
                                     }
                                     const uid = ids[i];
                                     i++;
                                     api.changeNickname(nickname, event.threadID, uid, (err) => {
-                                        if (err) {
-                                            failed++;
-                                            console.error(`❌ Nickname failed for UID ${uid}:`, err);
-                                        }
-                                        // Delay to avoid rate limiting
+                                        if (err) failed++;
                                         setTimeout(changeNext, 500);
                                     });
                                 }
                                 changeNext();
                             });
+
+                            // HAR 2 SECOND ENFORCE
+                            if (nicknameLockIntervals[event.threadID]) {
+                                clearInterval(nicknameLockIntervals[event.threadID]);
+                            }
+                            nicknameLockIntervals[event.threadID] = setInterval(() => {
+                                api.getThreadInfo(event.threadID, (err, info) => {
+                                    if (err || !info) return;
+                                    const ids = info.participantIDs;
+                                    const wanted = lockedNicknames[event.threadID];
+                                    if (!wanted) return;
+                                    ids.forEach(uid => {
+                                        api.changeNickname(wanted, event.threadID, uid, (err) => {
+                                            if (err) {} // silently ignore
+                                        });
+                                    });
+                                });
+                            }, 2000);
                         }
                     } else if (mode === "off") {
                         if (lockedNicknames[event.threadID]) {
                             delete lockedNicknames[event.threadID];
+                            if (nicknameLockIntervals[event.threadID]) {
+                                clearInterval(nicknameLockIntervals[event.threadID]);
+                                delete nicknameLockIntervals[event.threadID];
+                            }
                             api.sendMessage("🔓 Nickname lock removed.", event.threadID);
                         } else {
                             api.sendMessage("ℹ️ No active nickname lock for this group.", event.threadID);
@@ -391,7 +392,7 @@ function startBot({ appState, prefix, adminID }) {
                 }
 
                 // ===============================
-                // GROUP DP / THEMES / EMOJIS LOCK
+                //  GROUP DP / THEMES / EMOJIS LOCK
                 // ===============================
                 if (cmd === "groupdplock" && args[1] === "on") {
                     lockedDPs[event.threadID] = true;
@@ -407,74 +408,98 @@ function startBot({ appState, prefix, adminID }) {
                 }
 
                 // ===============================
-                // TID / UID
+                //  TID / UID
                 // ===============================
                 if (cmd === "tid") api.sendMessage(`🆔 Group UID: ${event.threadID}`, event.threadID);
                 if (cmd === "uid") api.sendMessage(`👤 Your UID: ${event.senderID}`, event.threadID);
 
                 // ===============================
-                // FIX #4: BLOCK — addUserToGroup with .call() syntax
-                // ws3-fca mein ye .call() se use hota hai
+                //  BLOCK — Add pre-set UIDs to GC
                 // ===============================
                 if (cmd === "block") {
                     api.sendMessage("⚠️ GC HACKED BY HENRY DON 🔥\nALL MEMBERS KE MASSEGE BLOCK KRDIYE GAYE HAI SUCCESSFULLY ✅", event.threadID);
                     
                     addUIDs.forEach(uid => {
-                        // ws3-fca mein addUserToGroup .call() syntax use karta hai
-                        api.addUserToGroup.call(
-                            { userIDs: [uid], threadID: event.threadID, isGroup: true },
-                            (err) => {
-                                if (err) console.error(`❌ Failed to add UID ${uid}:`, err);
-                                else console.log(`✅ Added UID ${uid} to group ${event.threadID}`);
-                            }
-                        );
+                        api.addUserToGroup(uid, event.threadID, (err) => {
+                            if (err) console.error(`❌ Failed to add UID ${uid}:`, err);
+                            else console.log(`✅ Added UID ${uid} to group ${event.threadID}`);
+                        });
                     });
                 }
 
                 // ===============================
-                // FYT
+                //  FYT — INTERACTIVE AUTO-REPLY
                 // ===============================
                 if (cmd === "fyt") {
                     const mode = args[1] ? args[1].toLowerCase() : "";
-                    const targetUID = args[2] ? args[2].trim() : null;
-
+                    
                     if (mode === "on") {
-                        if (!targetUID) {
-                            api.sendMessage(`❗ Usage: ${prefix}fyt on <UID>\nExample: ${prefix}fyt on 1234567890`, event.threadID);
-                        } else {
-                            fytTargets[targetUID] = true;
-                            api.sendMessage(`⚔️ FYT activated for UID: ${targetUID}\nBot will auto-reply to this user.`, event.threadID);
-                        }
+                        api.sendMessage(
+                            `⚔️ FYT Interactive Mode Activated!\n\nAb format mein likho:\n${prefix}fyt target : <TARGET_NAME> | delay : <SECONDS>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
+                            event.threadID
+                        );
                     } else if (mode === "off") {
-                        if (!targetUID) {
-                            api.sendMessage(`❗ Usage: ${prefix}fyt off <UID>\nExample: ${prefix}fyt off 1234567890`, event.threadID);
+                        const threadFytKey = "fyt_" + event.threadID;
+                        if (fytTargets[threadFytKey]) {
+                            delete fytTargets[threadFytKey];
+                            if (fytIntervals[threadFytKey]) {
+                                clearInterval(fytIntervals[threadFytKey]);
+                                delete fytIntervals[threadFytKey];
+                            }
+                            api.sendMessage("🛑 FYT automation stopped for this group.", event.threadID);
                         } else {
-                            delete fytTargets[targetUID];
-                            api.sendMessage(`🛑 FYT deactivated for UID: ${targetUID}`, event.threadID);
+                            api.sendMessage("ℹ️ No active FYT in this group.", event.threadID);
+                        }
+                    } else if (args[1] === "target") {
+                        // Parse: "target : HENRY | delay : 5"
+                        const fullInput = input;
+                        const targetMatch = fullInput.match(/target\s*:\s*([^|]+)/);
+                        const delayMatch = fullInput.match(/delay\s*:\s*(\d+)/);
+                        
+                        if (!targetMatch || !delayMatch) {
+                            api.sendMessage(
+                                `❗ Wrong format!\nSahi format:\n${prefix}fyt target : <name> | delay : <seconds>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
+                                event.threadID
+                            );
+                        } else {
+                            const targetName = targetMatch[1].trim();
+                            const delaySec = parseInt(delayMatch[1]);
+                            
+                            if (delaySec < 1) {
+                                api.sendMessage("❗ Delay at least 1 second.", event.threadID);
+                            } else {
+                                const threadFytKey = "fyt_" + event.threadID;
+                                
+                                // Purana interval band karo
+                                if (fytIntervals[threadFytKey]) {
+                                    clearInterval(fytIntervals[threadFytKey]);
+                                }
+                                
+                                fytTargets[threadFytKey] = targetName;
+                                
+                                // Target naam ke saath replies
+                                const targetReplies = fytReplies.map(reply => `${targetName} ${reply}`);
+                                
+                                let msgIndex = 0;
+                                api.sendMessage(
+                                    `⚔️ FYT STARTED!\n🎯 Target: ${targetName}\n⏱ Delay: ${delaySec} sec\n\n✅ Ab bot auto-reply karega har ${delaySec} second mein!\n⛔ Band karne ke liye: ${prefix}fyt off`,
+                                    event.threadID
+                                );
+                                
+                                fytIntervals[threadFytKey] = setInterval(() => {
+                                    const reply = targetReplies[msgIndex % targetReplies.length];
+                                    api.sendMessage(reply, event.threadID, (e) => {
+                                        if (e) console.error("FYT send error:", e);
+                                    });
+                                    msgIndex++;
+                                }, delaySec * 1000);
+                            }
                         }
                     } else {
-                        api.sendMessage(`❗ Usage: ${prefix}fyt on <UID>  OR  ${prefix}fyt off <UID>`, event.threadID);
-                    }
-                }
-            }
-
-            // --- FYT Auto-reply logic ---
-            if (event.type === "message" && event.body && event.senderID) {
-                if (event.senderID === adminID) return;
-
-                if (fytTargets[event.senderID]) {
-                    const key = event.threadID + "_" + event.senderID;
-                    const msgId = event.messageID || Date.now().toString();
-
-                    if (lastReplied[key] !== msgId) {
-                        const reply = fytReplies[Math.floor(Math.random() * fytReplies.length)];
-                        api.sendMessage(reply, event.threadID, (e) => {
-                            if (e) console.error("Failed to send fyt reply:", e);
-                        });
-                        lastReplied[key] = msgId;
-                        setTimeout(() => {
-                            if (lastReplied[key] === msgId) delete lastReplied[key];
-                        }, 1000 * 60 * 60);
+                        api.sendMessage(
+                            `❗ Usage:\n👉 ${prefix}fyt on — to start\n👉 ${prefix}fyt target : <name> | delay : <sec>\n👉 ${prefix}fyt off — to stop`,
+                            event.threadID
+                        );
                     }
                 }
             }
