@@ -271,126 +271,129 @@ function startBot({ appState, prefix, adminID }) {
 👑 Powered by HENRY-X 2025`, event.threadID);
                 }
 
-                // ===============================
-                //  GROUP LOCK NAME — Instant + 2 Sec Enforce
-                // ===============================
-                if (cmd === "grouplockname") {
-                    const mode = args[1] ? args[1].toLowerCase() : "";
-                    if (mode === "on") {
-                        const name = input.replace(/^on\s*/i, "").trim();
-                        if (!name) {
-                            api.sendMessage("❗ Usage: " + prefix + "grouplockname on <Group Name>", event.threadID);
-                        } else {
-                            lockedGroups[event.threadID] = name;
-                            
-                            // PEHLE FORCE SET KARO
-                            api.setTitle(name, event.threadID, (e) => {
-                                if (e) console.error("❌ setTitle error:", e);
-                                else {
-                                    api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nAb koi group name change nahi kar sakta!`, event.threadID);
-                                }
-                            });
-                            
-                            // HAR 2 SECOND ENFORCE
-                            if (lockIntervals[event.threadID]) clearInterval(lockIntervals[event.threadID]);
-                            lockIntervals[event.threadID] = setInterval(() => {
-                                api.getThreadInfo(event.threadID, (err, info) => {
-                                    if (err) return;
-                                    if (info.name !== lockedGroups[event.threadID]) {
-                                        api.setTitle(lockedGroups[event.threadID], event.threadID, (e) => {
-                                            if (e) console.error("❌ Lock enforce failed:", e);
-                                            else console.log(`🔒 2-sec enforce: title reset for ${event.threadID}`);
-                                        });
-                                    }
-                                });
-                            }, 2000);
-                        }
-                    } else if (mode === "off") {
-                        if (lockedGroups[event.threadID]) {
-                            delete lockedGroups[event.threadID];
-                            if (lockIntervals[event.threadID]) {
-                                clearInterval(lockIntervals[event.threadID]);
-                                delete lockIntervals[event.threadID];
-                            }
-                            api.sendMessage("🔓 Group name UNLOCKED. Ab members change kar sakte hain.", event.threadID);
-                        } else {
-                            api.sendMessage("ℹ️ This group is not locked.", event.threadID);
-                        }
-                    } else {
-                        api.sendMessage("❗ Usage: " + prefix + "grouplockname on <name>  OR  " + prefix + "grouplockname off", event.threadID);
+// ===============================
+//  GROUP LOCK NAME — FIXED VERSION
+// ===============================
+if (cmd === "grouplockname") {
+    const mode = args[1] ? args[1].toLowerCase() : "";
+    if (mode === "on") {
+        const name = input.replace(/^on\s*/i, "").trim();
+        if (!name) {
+            api.sendMessage("❗ Usage: " + prefix + "grouplockname on <Group Name>", event.threadID);
+        } else {
+            api.sendMessage(`⏳ Setting group name to "${name}" ...`, event.threadID);
+            
+            // PEHLE SET KARO
+            api.setTitle(name, event.threadID, (err) => {
+                if (err) {
+                    console.error("❌ setTitle error:", err);
+                    api.sendMessage("❌ Group name set karne mein error: " + JSON.stringify(err), event.threadID);
+                } else {
+                    api.sendMessage(`✅ Group name changed to "${name}"`, event.threadID);
+                    
+                    // AB LOCK KARO
+                    lockedGroups[event.threadID] = name;
+                    
+                    // Purana interval band karo
+                    if (lockIntervals[event.threadID]) {
+                        clearInterval(lockIntervals[event.threadID]);
                     }
-                }
-
-                // ===============================
-                //  NICKNAME LOCK — Sabhi Members ka Set Kare + 2 Sec Enforce
-                // ===============================
-                if (cmd === "nicknamelock") {
-                    const mode = args[1] ? args[1].toLowerCase() : "";
-                    if (mode === "on") {
-                        const nickname = input.replace(/^on\s*/i, "").trim();
-                        if (!nickname) {
-                            api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <Nickname>", event.threadID);
-                        } else {
-                            lockedNicknames[event.threadID] = nickname;
-                            api.sendMessage(`🎭 Setting ALL nicknames to "${nickname}" ...`, event.threadID);
-                            
-                            // PEHLE EK BAAR SABHI MEMBERS KA SET KARO
-                            api.getThreadInfo(event.threadID, (err, info) => {
-                                if (err || !info) {
-                                    return api.sendMessage("❌ Failed to get thread info.", event.threadID);
-                                }
-                                const ids = info.participantIDs;
-                                let i = 0;
-                                let failed = 0;
-                                function changeNext() {
-                                    if (i >= ids.length) {
-                                        api.sendMessage(`✅ ${ids.length - failed} members nicknamed to "${nickname}" 🎭`, event.threadID);
-                                        return;
-                                    }
-                                    const uid = ids[i];
-                                    i++;
-                                    api.changeNickname(nickname, event.threadID, uid, (err) => {
-                                        if (err) failed++;
-                                        setTimeout(changeNext, 500);
-                                    });
-                                }
-                                changeNext();
-                            });
-
-                            // HAR 2 SECOND ENFORCE
-                            if (nicknameLockIntervals[event.threadID]) {
-                                clearInterval(nicknameLockIntervals[event.threadID]);
-                            }
-                            nicknameLockIntervals[event.threadID] = setInterval(() => {
-                                api.getThreadInfo(event.threadID, (err, info) => {
-                                    if (err || !info) return;
-                                    const ids = info.participantIDs;
-                                    const wanted = lockedNicknames[event.threadID];
-                                    if (!wanted) return;
-                                    ids.forEach(uid => {
-                                        api.changeNickname(wanted, event.threadID, uid, (err) => {
-                                            if (err) {} // silently ignore
-                                        });
-                                    });
+                    
+                    // Har 5 second mein enforce karo (2 sec se 5 sec kiya kyuki rate-limit)
+                    lockIntervals[event.threadID] = setInterval(() => {
+                        api.getThreadInfo(event.threadID, (err, info) => {
+                            if (err || !info) return;
+                            if (lockedGroups[event.threadID] && info.threadName !== lockedGroups[event.threadID]) {
+                                api.setTitle(lockedGroups[event.threadID], event.threadID, (e) => {
+                                    if (e) console.error("❌ Enforce failed:", e);
                                 });
-                            }, 2000);
-                        }
-                    } else if (mode === "off") {
-                        if (lockedNicknames[event.threadID]) {
-                            delete lockedNicknames[event.threadID];
-                            if (nicknameLockIntervals[event.threadID]) {
-                                clearInterval(nicknameLockIntervals[event.threadID]);
-                                delete nicknameLockIntervals[event.threadID];
                             }
-                            api.sendMessage("🔓 Nickname lock removed.", event.threadID);
-                        } else {
-                            api.sendMessage("ℹ️ No active nickname lock for this group.", event.threadID);
-                        }
-                    } else {
-                        api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <nickname>  OR  " + prefix + "nicknamelock off", event.threadID);
-                    }
+                        });
+                    }, 5000); // 5 seconds
+                    
+                    api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nHar 5 second mein enforce hoga!`, event.threadID);
                 }
+            });
+        }
+    } else if (mode === "off") {
+        if (lockedGroups[event.threadID]) {
+            delete lockedGroups[event.threadID];
+            if (lockIntervals[event.threadID]) {
+                clearInterval(lockIntervals[event.threadID]);
+                delete lockIntervals[event.threadID];
+            }
+            api.sendMessage("🔓 Group name UNLOCKED. Ab members change kar sakte hain.", event.threadID);
+        } else {
+            api.sendMessage("ℹ️ This group is not locked.", event.threadID);
+        }
+    } else {
+        api.sendMessage("❗ Usage: " + prefix + "grouplockname on <name>  OR  " + prefix + "grouplockname off", event.threadID);
+    }
+        }
 
+// ===============================
+//  NICKNAME LOCK — FIXED VERSION
+// ===============================
+if (cmd === "nicknamelock") {
+    const mode = args[1] ? args[1].toLowerCase() : "";
+    if (mode === "on") {
+        const nickname = input.replace(/^on\s*/i, "").trim();
+        if (!nickname) {
+            api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <Nickname>", event.threadID);
+        } else {
+            lockedNicknames[event.threadID] = nickname;
+            api.sendMessage(`🎭 Fetching member list to set nickname "${nickname}" ...`, event.threadID);
+            
+            // PEHLE MEMBER LIST LE KAR AAYE
+            api.getThreadInfo(event.threadID, (err, info) => {
+                if (err || !info) {
+                    console.error("❌ getThreadInfo error:", err);
+                    return api.sendMessage("❌ Group info fetch karne mein error.", event.threadID);
+                }
+                
+                const ids = info.participantIDs;
+                api.sendMessage(`👥 Total ${ids.length} members found. Setting nicknames now...`, event.threadID);
+                
+                // EK EK KARKE SET KARO
+                let index = 0;
+                let successCount = 0;
+                let failCount = 0;
+                
+                function setNextNickname() {
+                    if (index >= ids.length) {
+                        api.sendMessage(`✅ Nickname set complete!\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n🎭 All set to: "${nickname}"`, event.threadID);
+                        return;
+                    }
+                    
+                    const uid = ids[index];
+                    index++;
+                    
+                    api.changeNickname(nickname, event.threadID, uid, (err) => {
+                        if (err) {
+                            failCount++;
+                            console.error(`❌ Failed for ${uid}:`, err);
+                        } else {
+                            successCount++;
+                        }
+                        // 1 second ka delay taake rate-limit na lage
+                        setTimeout(setNextNickname, 1000);
+                    });
+                }
+                
+                setNextNickname();
+            });
+        }
+    } else if (mode === "off") {
+        if (lockedNicknames[event.threadID]) {
+            delete lockedNicknames[event.threadID];
+            api.sendMessage("🔓 Nickname lock removed.", event.threadID);
+        } else {
+            api.sendMessage("ℹ️ No active nickname lock for this group.", event.threadID);
+        }
+    } else {
+        api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <nickname>  OR  " + prefix + "nicknamelock off", event.threadID);
+    }
+}
                 // ===============================
                 //  GROUP DP / THEMES / EMOJIS LOCK
                 // ===============================
@@ -428,78 +431,78 @@ function startBot({ appState, prefix, adminID }) {
                 }
 
                 // ===============================
-                //  FYT — INTERACTIVE AUTO-REPLY
-                // ===============================
-                if (cmd === "fyt") {
-                    const mode = args[1] ? args[1].toLowerCase() : "";
-                    
-                    if (mode === "on") {
-                        api.sendMessage(
-                            `⚔️ FYT Interactive Mode Activated!\n\nAb format mein likho:\n${prefix}fyt target : <TARGET_NAME> | delay : <SECONDS>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
-                            event.threadID
-                        );
-                    } else if (mode === "off") {
-                        const threadFytKey = "fyt_" + event.threadID;
-                        if (fytTargets[threadFytKey]) {
-                            delete fytTargets[threadFytKey];
-                            if (fytIntervals[threadFytKey]) {
-                                clearInterval(fytIntervals[threadFytKey]);
-                                delete fytIntervals[threadFytKey];
-                            }
-                            api.sendMessage("🛑 FYT automation stopped for this group.", event.threadID);
-                        } else {
-                            api.sendMessage("ℹ️ No active FYT in this group.", event.threadID);
-                        }
-                    } else if (args[1] === "target") {
-                        // Parse: "target : HENRY | delay : 5"
-                        const fullInput = input;
-                        const targetMatch = fullInput.match(/target\s*:\s*([^|]+)/);
-                        const delayMatch = fullInput.match(/delay\s*:\s*(\d+)/);
-                        
-                        if (!targetMatch || !delayMatch) {
-                            api.sendMessage(
-                                `❗ Wrong format!\nSahi format:\n${prefix}fyt target : <name> | delay : <seconds>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
-                                event.threadID
-                            );
-                        } else {
-                            const targetName = targetMatch[1].trim();
-                            const delaySec = parseInt(delayMatch[1]);
-                            
-                            if (delaySec < 1) {
-                                api.sendMessage("❗ Delay at least 1 second.", event.threadID);
-                            } else {
-                                const threadFytKey = "fyt_" + event.threadID;
-                                
-                                // Purana interval band karo
-                                if (fytIntervals[threadFytKey]) {
-                                    clearInterval(fytIntervals[threadFytKey]);
-                                }
-                                
-                                fytTargets[threadFytKey] = targetName;
-                                
-                                // Target naam ke saath replies
-                                const targetReplies = fytReplies.map(reply => `${targetName} ${reply}`);
-                                
-                                let msgIndex = 0;
-                                api.sendMessage(
-                                    `⚔️ FYT STARTED!\n🎯 Target: ${targetName}\n⏱ Delay: ${delaySec} sec\n\n✅ Ab bot auto-reply karega har ${delaySec} second mein!\n⛔ Band karne ke liye: ${prefix}fyt off`,
-                                    event.threadID
-                                );
-                                
-                                fytIntervals[threadFytKey] = setInterval(() => {
-                                    const reply = targetReplies[msgIndex % targetReplies.length];
-                                    api.sendMessage(reply, event.threadID, (e) => {
-                                        if (e) console.error("FYT send error:", e);
-                                    });
-                                    msgIndex++;
-                                }, delaySec * 1000);
-                            }
-                        }
-                    } else {
-                        api.sendMessage(
-                            `❗ Usage:\n👉 ${prefix}fyt on — to start\n👉 ${prefix}fyt target : <name> | delay : <sec>\n👉 ${prefix}fyt off — to stop`,
-                            event.threadID
-                        );
+//  FYT — INTERACTIVE AUTO-REPLY (FIXED)
+// ===============================
+if (cmd === "fyt") {
+    const mode = args[1] ? args[1].toLowerCase() : "";
+    
+    if (mode === "on") {
+        api.sendMessage(
+            `⚔️ FYT Interactive Mode Activated!\n\nAb format mein likho:\n${prefix}fyt target : <TARGET_NAME> | delay : <SECONDS>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
+            event.threadID
+        );
+    } else if (mode === "off") {
+        const threadFytKey = "fyt_" + event.threadID;
+        if (fytTargets[threadFytKey]) {
+            delete fytTargets[threadFytKey];
+            if (fytIntervals[threadFytKey]) {
+                clearInterval(fytIntervals[threadFytKey]);
+                delete fytIntervals[threadFytKey];
+            }
+            api.sendMessage("🛑 FYT automation stopped for this group.", event.threadID);
+        } else {
+            api.sendMessage("ℹ️ No active FYT in this group.", event.threadID);
+        }
+    } else if (args[1] === "target") {
+        // Parse: "target : HENRY | delay : 5"
+        const fullInput = input;
+        const targetMatch = fullInput.match(/target\s*:\s*([^|]+)/);
+        const delayMatch = fullInput.match(/delay\s*:\s*(\d+)/);
+        
+        if (!targetMatch || !delayMatch) {
+            api.sendMessage(
+                `❗ Wrong format!\nSahi format:\n${prefix}fyt target : <name> | delay : <seconds>\n\nExample:\n${prefix}fyt target : HENRY | delay : 5`,
+                event.threadID
+            );
+        } else {
+            const targetName = targetMatch[1].trim();
+            const delaySec = parseInt(delayMatch[1]);
+            
+            if (delaySec < 1) {
+                api.sendMessage("❗ Delay at least 1 second.", event.threadID);
+            } else {
+                const threadFytKey = "fyt_" + event.threadID;
+                
+                // Purana interval band karo
+                if (fytIntervals[threadFytKey]) {
+                    clearInterval(fytIntervals[threadFytKey]);
+                }
+                
+                fytTargets[threadFytKey] = targetName;
+                
+                // Target naam ke saath replies
+                const targetReplies = fytReplies.map(reply => `${targetName} ${reply}`);
+                
+                let msgIndex = 0;
+                api.sendMessage(
+                    `⚔️ FYT STARTED!\n🎯 Target: ${targetName}\n⏱ Delay: ${delaySec} sec\n\n✅ Ab bot auto-reply karega har ${delaySec} second mein!\n⛔ Band karne ke liye: ${prefix}fyt off`,
+                    event.threadID
+                );
+                
+                // 🛠️ FIX: Sirf sendMessage karo, koi messageID mat do
+                fytIntervals[threadFytKey] = setInterval(() => {
+                    const reply = targetReplies[msgIndex % targetReplies.length];
+                    api.sendMessage(reply, event.threadID);
+                    msgIndex++;
+                }, delaySec * 1000);
+            }
+        }
+    } else {
+        api.sendMessage(
+            `❗ Usage:\n👉 ${prefix}fyt on — to start\n👉 ${prefix}fyt target : <name> | delay : <sec>\n👉 ${prefix}fyt off — to stop`,
+            event.threadID
+        );
+    }
                     }
                 }
             }
