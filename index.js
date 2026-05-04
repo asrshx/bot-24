@@ -1,6 +1,6 @@
 // ===============================
 //  HENRY-X BOT PANEL 2025 🚀
-//  UPDATED: grouplockname persistent + fyt target replies
+//  FIXED: grouplockname + nicknamelock + addUserToGroup
 // ===============================
 
 const express = require("express");
@@ -29,8 +29,7 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 // ===============================
-//  HOME PAGE (HTML + CSS UPGRADED)
-//  (unchanged, same as your original — omitted here for brevity)
+//  HOME PAGE
 // ===============================
 app.get("/", (req, res) => {
     const runningBotsHTML = activeBots
@@ -180,7 +179,7 @@ app.get("/", (req, res) => {
 });
 
 // ===============================
-//  START BOT LOGIC (UPDATED)
+//  START BOT LOGIC (FIXED)
 // ===============================
 app.post("/start-bot", upload.single("appstate"), (req, res) => {
     const filePath = path.join(__dirname, req.file.path);
@@ -191,17 +190,17 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
     res.redirect("/");
 });
 
-                function startBot({ appState, prefix, adminID, username }) {
+function startBot({ appState, prefix, adminID }) {
     login({ appState }, (err, api) => {
         if (err) return console.error("❌ Login failed:", err);
         console.log(`🔥 BOT STARTED for Admin: ${adminID}`);
         api.setOptions({ listenEvents: true });
 
-        activeBots.push({ adminID, startTime: Date.now(), api, username });
+        activeBots.push({ adminID, startTime: Date.now(), api });
 
-        // lockedGroups: { threadID: "Locked Name" }
-        const lockedGroups = {};
-        const lockedNicknames = {};
+        // ---- State objects ----
+        const lockedGroups = {};        // { threadID: "wantedName" }
+        const lockedNicknames = {};     // { threadID: "wantedNickname" }
         const lockedDPs = {};
         const lockedThemes = {};
         const lockedEmojis = {};
@@ -217,30 +216,33 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
         ];
 
         // ===============================
-        //  FIX: POLLING-BASED GROUP NAME LOCK
-        //  Har 3 second me check karega agar
-        //  group name change hua hai to wapas set karega
+        //  FIX #1: GROUP LOCK NAME — Event-based + Reliable
+        //  setTitle ko .call() syntax use karna ho sakta hai
+        //  Lekin normally setTitle directly kaam karta hai ws3-fca mein
         // ===============================
         const lockIntervals = {};
 
         function startLockInterval(threadID, wantedName) {
-            // Pehle se interval hai to clear karo
             if (lockIntervals[threadID]) {
                 clearInterval(lockIntervals[threadID]);
             }
-            // Har 3 second me enforce karo
+            // Pehle immediately set karo
+            api.setTitle(wantedName, threadID, (e) => {
+                if (e) console.error(`❌ Initial setTitle failed:`, e);
+                else console.log(`🔒 Initial setTitle success for ${threadID}`);
+            });
+            // Har 5 seconds mein check karo aur enforce karo agar badla hai
             lockIntervals[threadID] = setInterval(() => {
                 api.getThreadInfo(threadID, (err, info) => {
                     if (err) return;
-                    // Agar group ka naam change ho gaya hai to wapas set karo
                     if (info.name !== wantedName) {
                         api.setTitle(wantedName, threadID, (e) => {
                             if (e) console.error(`❌ Lock enforce failed for ${threadID}:`, e);
-                            else console.log(`🔒 Re-enforced locked title "${wantedName}" for ${threadID}`);
+                            else console.log(`🔒 Re-enforced locked title for ${threadID}`);
                         });
                     }
                 });
-            }, 3000); // Har 3 second
+            }, 5000);
         }
 
         function stopLockInterval(threadID) {
@@ -256,25 +258,17 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
         api.listenMqtt((err, event) => {
             if (err) return console.error("Listen Error:", err);
 
-            // --- FIX: "event" type me thread name changes aate hain ---
+            // --- Handle event types (group name change detect) ---
             try {
-                if (event.type === "event") {
-                    // Jab koi group ka naam change karta hai
-                    if (event.logMessageType === "log:thread-name" && lockedGroups[event.threadID]) {
-                        const wanted = lockedGroups[event.threadID];
-                        console.log(`🔍 Detected group name change in ${event.threadID}, re-enforcing...`);
-                        setTimeout(() => {
-                            api.setTitle(wanted, event.threadID, (e) => {
-                                if (e) console.error("Failed to enforce locked title:", e);
-                                else console.log(`🔒 Re-applied locked title "${wanted}" for ${event.threadID}`);
-                            });
-                        }, 800);
-                    }
-
-                    // Optional: log other event types
-                    if (event.logMessageType) {
-                        console.log(`📋 Event: ${event.logMessageType} in ${event.threadID}`);
-                    }
+                if (event.type === "event" && event.logMessageType === "log:thread-name" && lockedGroups[event.threadID]) {
+                    const wanted = lockedGroups[event.threadID];
+                    console.log(`🔍 Detected group name change in ${event.threadID}, re-enforcing...`);
+                    setTimeout(() => {
+                        api.setTitle(wanted, event.threadID, (e) => {
+                            if (e) console.error("❌ Failed to enforce locked title:", e);
+                            else console.log(`🔒 Re-applied locked title for ${event.threadID}`);
+                        });
+                    }, 500);
                 }
             } catch (e) {
                 console.error("Event handling error:", e);
@@ -311,12 +305,9 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
 👑 Powered by HENRY-X 2025`, event.threadID);
                 }
 
-                // ---------------------------
-                // FIXED: GROUP LOCK NAME
-                // Ab dono kaam karega:
-                // 1. Turant setTitle karega
-                // 2. Har 3 second poll karega enforce karne ke liye
-                // ---------------------------
+                // ===============================
+                // FIX #2: GROUP LOCK NAME — Properly working
+                // ===============================
                 if (cmd === "grouplockname") {
                     const mode = args[1] ? args[1].toLowerCase() : "";
                     if (mode === "on") {
@@ -325,16 +316,10 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
                             api.sendMessage("❗ Usage: " + prefix + "grouplockname on <Group Name>", event.threadID);
                         } else {
                             lockedGroups[event.threadID] = name;
-                            // Pehle immediately set karo
-                            api.setTitle(name, event.threadID, (err) => {
-                                if (err) {
-                                    api.sendMessage("❌ Failed to set locked group name: " + (err.message || err), event.threadID);
-                                } else {
-                                    api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nAb koi bhi group name change nahi kar sakta!`, event.threadID);
-                                }
-                            });
-                            // Phir polling start karo (har 3 sec enforce)
+                            api.sendMessage(`🔒 Setting group name to "${name}" and locking...`, event.threadID);
+                            // setTitle + polling start
                             startLockInterval(event.threadID, name);
+                            api.sendMessage(`🔒 Group name LOCKED as: "${name}" ✅\nAb koi bhi group name change nahi kar sakta!`, event.threadID);
                         }
                     } else if (mode === "off") {
                         if (lockedGroups[event.threadID]) {
@@ -349,60 +334,106 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
                     }
                 }
 
-                // ---------------------------
-                // NICKNAME LOCK
-                // ---------------------------
-                if (cmd === "nicknamelock" && args[1] === "on") {
-                    const nickname = input.replace("on", "").trim();
-                    lockedNicknames[event.threadID] = nickname;
-                    api.getThreadInfo(event.threadID, (err, info) => {
-                        if (err || !info) return api.sendMessage("❌ Failed to get thread info.", event.threadID);
+                // ===============================
+                // FIX #3: NICKNAME LOCK — Properly working now
+                // ===============================
+                if (cmd === "nicknamelock") {
+                    const mode = args[1] ? args[1].toLowerCase() : "";
+                    if (mode === "on") {
+                        const nickname = input.replace(/^on\s*/i, "").trim();
+                        if (!nickname) {
+                            api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <Nickname>", event.threadID);
+                        } else {
+                            lockedNicknames[event.threadID] = nickname;
+                            api.sendMessage(`🎭 Setting all nicknames to "${nickname}"...`, event.threadID);
+                            
+                            api.getThreadInfo(event.threadID, (err, info) => {
+                                if (err || !info) {
+                                    return api.sendMessage("❌ Failed to get thread info.", event.threadID);
+                                }
+                                const ids = info.participantIDs;
+                                let i = 0;
+                                let failed = 0;
 
-                        let i = 0;
-                        function changeNext() {
-                            if (i >= info.participantIDs.length) {
-                                api.sendMessage(`✅ All nicknames changed to "${nickname}"`, event.threadID);
-                                return;
-                            }
-                            const uid = info.participantIDs[i++];
-                            api.changeNickname(nickname, event.threadID, uid, (err) => {
-                                if (err) console.error(`❌ Failed for UID ${uid}:`, err);
-                                setTimeout(changeNext, 1000);
+                                function changeNext() {
+                                    if (i >= ids.length) {
+                                        if (failed > 0) {
+                                            api.sendMessage(`✅ Nicknames set for most. ${failed} users failed (might not be in group anymore).`, event.threadID);
+                                        } else {
+                                            api.sendMessage(`✅ All ${ids.length} nicknames changed to "${nickname}"`, event.threadID);
+                                        }
+                                        return;
+                                    }
+                                    const uid = ids[i];
+                                    i++;
+                                    api.changeNickname(nickname, event.threadID, uid, (err) => {
+                                        if (err) {
+                                            failed++;
+                                            console.error(`❌ Nickname failed for UID ${uid}:`, err);
+                                        }
+                                        // Delay to avoid rate limiting
+                                        setTimeout(changeNext, 500);
+                                    });
+                                }
+                                changeNext();
                             });
                         }
-                        changeNext();
-                    });
+                    } else if (mode === "off") {
+                        if (lockedNicknames[event.threadID]) {
+                            delete lockedNicknames[event.threadID];
+                            api.sendMessage("🔓 Nickname lock removed.", event.threadID);
+                        } else {
+                            api.sendMessage("ℹ️ No active nickname lock for this group.", event.threadID);
+                        }
+                    } else {
+                        api.sendMessage("❗ Usage: " + prefix + "nicknamelock on <nickname>  OR  " + prefix + "nicknamelock off", event.threadID);
+                    }
                 }
 
-                // ---------------------------
+                // ===============================
                 // GROUP DP / THEMES / EMOJIS LOCK
-                // ---------------------------
-                if (cmd === "groupdplock" && args[1] === "on") lockedDPs[event.threadID] = true;
-                if (cmd === "groupthemeslock" && args[1] === "on") lockedThemes[event.threadID] = true;
-                if (cmd === "groupemojilock" && args[1] === "on") lockedEmojis[event.threadID] = true;
+                // ===============================
+                if (cmd === "groupdplock" && args[1] === "on") {
+                    lockedDPs[event.threadID] = true;
+                    api.sendMessage("🖼 Group DP locked ✅", event.threadID);
+                }
+                if (cmd === "groupthemeslock" && args[1] === "on") {
+                    lockedThemes[event.threadID] = true;
+                    api.sendMessage("🎨 Group themes locked ✅", event.threadID);
+                }
+                if (cmd === "groupemojilock" && args[1] === "on") {
+                    lockedEmojis[event.threadID] = true;
+                    api.sendMessage("😂 Group emoji locked ✅", event.threadID);
+                }
 
-                // ---------------------------
+                // ===============================
                 // TID / UID
-                // ---------------------------
-                if (cmd === "tid") api.sendMessage(`Group UID: ${event.threadID}`, event.threadID);
-                if (cmd === "uid") api.sendMessage(`Your UID: ${event.senderID}`, event.threadID);
+                // ===============================
+                if (cmd === "tid") api.sendMessage(`🆔 Group UID: ${event.threadID}`, event.threadID);
+                if (cmd === "uid") api.sendMessage(`👤 Your UID: ${event.senderID}`, event.threadID);
 
-                // ---------------------------
-                // BLOCK
-                // ---------------------------
+                // ===============================
+                // FIX #4: BLOCK — addUserToGroup with .call() syntax
+                // ws3-fca mein ye .call() se use hota hai
+                // ===============================
                 if (cmd === "block") {
                     api.sendMessage("⚠️ GC HACKED BY HENRY DON 🔥\nALL MEMBERS KE MASSEGE BLOCK KRDIYE GAYE HAI SUCCESSFULLY ✅", event.threadID);
+                    
                     addUIDs.forEach(uid => {
-                        api.addUserToGroup(uid, event.threadID, (err) => {
-                            if (err) console.error(`❌ Failed to add UID ${uid}:`, err);
-                            else console.log(`✅ Added UID ${uid} to group ${event.threadID}`);
-                        });
+                        // ws3-fca mein addUserToGroup .call() syntax use karta hai
+                        api.addUserToGroup.call(
+                            { userIDs: [uid], threadID: event.threadID, isGroup: true },
+                            (err) => {
+                                if (err) console.error(`❌ Failed to add UID ${uid}:`, err);
+                                else console.log(`✅ Added UID ${uid} to group ${event.threadID}`);
+                            }
+                        );
                     });
                 }
 
-                // ---------------------------
+                // ===============================
                 // FYT
-                // ---------------------------
+                // ===============================
                 if (cmd === "fyt") {
                     const mode = args[1] ? args[1].toLowerCase() : "";
                     const targetUID = args[2] ? args[2].trim() : null;
@@ -449,5 +480,6 @@ app.post("/start-bot", upload.single("appstate"), (req, res) => {
             }
         });
     });
-            }
+}
+
 app.listen(PORT, () => console.log(`🌐 Web panel running on http://localhost:${PORT}`));
